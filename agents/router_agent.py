@@ -11,8 +11,10 @@ from agents.llm_service import query_llm
 # -------------------------
 # Configuration
 # -------------------------
-if "HF_TOKEN" not in os.environ:
-    os.environ['HF_TOKEN'] = "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"
+
+os.environ['HF_TOKEN'] = "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"
+
+HF_TOKEN = "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"
 
 SUPPORT_AGENT_URL = "http://127.0.0.1:8102"
 DATA_AGENT_URL = "http://127.0.0.1:8101"
