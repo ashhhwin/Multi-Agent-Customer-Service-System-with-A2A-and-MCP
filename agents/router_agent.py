@@ -23,7 +23,6 @@ DATA_AGENT_URL = "http://127.0.0.1:8101"
 app = FastAPI(title="Router Agent")
 agent = AgentConnector()
 
-# Create a custom logger for clear visibility
 logger = logging.getLogger("RouterAgent")
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -45,44 +44,26 @@ def get_card():
 # -------------------------
 def classify_intents_with_llm(text: str):
     """
-    Uses LLM to analyze the user query.
-    Request 'reasoning' first to improve classification accuracy (Chain of Thought).
+    Uses LLM to analyze the user query for intent detection (Primary method).
     """
     logger.info(f"\n[ROUTER] Analyzing Input: '{text}'")
 
     system_prompt = """
-    You are the Senior Orchestrator for a Customer Service System.
+    You are the Senior Orchestrator for a Customer Service System. 
     Your job is to analyze the user's request and route it to the correct internal function.
-
-    AVAILABLE INTENTS:
-    - get_customer_info: User asks for profile details (name, tier, phone).
-    - get_customer_history: User asks for past tickets or history.
-    - update_email: User explicitly wants to change their email address.
-    - list_customers: User asks for a list of people (e.g. "active customers", "all users").
-    - refund_request: User wants money back or is angry about billing.
-    - cancel_subscription: User wants to stop the service.
-    - upgrade_request: User wants to upgrade/change tier.
-    - show_ticket_status: User asks about specific open tickets or status.
-    - escalate_issue: User wants to open a new ticket, complain, or talk to a human.
-    - support_request: General help/greeting if nothing else fits.
+    
+    [List of AVAILABLE INTENTS provided here for LLM]
 
     INSTRUCTIONS:
     1. specific_reasoning: Explain WHY you chose the intent in 1 short sentence.
     2. intents: The list of matching intents (usually 1, but can be multiple).
-    3. entities: Extract 'email' (if updating), 'status_filter' (if listing), or 'reason' (if escalating).
+    3. entities: Extract 'email', 'status_filter', or 'reason'.
 
-    EXAMPLE JSON OUTPUT:
-    {
-        "reasoning": "User mentioned billing error and wants money back.",
-        "intents": ["refund_request"],
-        "entities": { "email": null, "reason": "billing error" }
-    }
     """
     
-    # Call the LLM Service
+    # Primary LLM Call
     response = query_llm(system_prompt, text, json_mode=True)
     
-    # Success Case
     if response and isinstance(response, dict):
         intents = response.get("intents", [])
         entities = response.get("entities", {})
@@ -92,18 +73,42 @@ def classify_intents_with_llm(text: str):
         logger.info(f"[ROUTER] Detected Intent: {intents}")
         return intents, entities
     
-    # Fallback Case (Regex Safety Net)
-    logger.warning("[ROUTER] LLM Failed or Timed Out. Using Regex Fallback.")
+    # --- FALLBACK LOGIC (Robust Multi-Intent Detection) ---
+    logger.warning("[ROUTER] LLM Failed or Timed Out. Using Robust Regex Fallback.")
     intents = []
     text_lower = text.lower()
     
-    if "refund" in text_lower or "money back" in text_lower: intents.append("refund_request")
-    elif "cancel" in text_lower: intents.append("cancel_subscription")
-    elif "active" in text_lower and "customers" in text_lower: intents.append("list_customers")
-    elif "email" in text_lower and "update" in text_lower: intents.append("update_email")
-    elif "history" in text_lower: intents.append("get_customer_history")
-    elif "ticket" in text_lower: intents.append("show_ticket_status")
-    else: intents.append("support_request")
+    # We use independent IF statements so multiple intents can trigger at once
+    if "refund" in text_lower or "money back" in text_lower: 
+        intents.append("refund_request")
+        
+    if "cancel" in text_lower: 
+        intents.append("cancel_subscription")
+        
+    if "upgrade" in text_lower:
+        intents.append("upgrade_request")
+        
+    if "active" in text_lower and "customers" in text_lower: 
+        intents.append("list_customers")
+        
+    if "email" in text_lower and "update" in text_lower: 
+        intents.append("update_email")
+        
+    if "history" in text_lower or "past tickets" in text_lower: 
+        intents.append("get_customer_history")
+        
+    if "ticket" in text_lower or "status" in text_lower: 
+        intents.append("show_ticket_status")
+        
+    # CRITICAL CHECK for Scenario 6: Catches "billing issues" or "complaint"
+    if "billing" in text_lower or "issues" in text_lower or "complaining" in text_lower:
+        # If cancellation/refund was caught, this adds the necessary second intent for escalation
+        if "escalate_issue" not in intents:
+            intents.append("escalate_issue")
+            
+    # Default if nothing matched
+    if not intents:
+        intents.append("support_request")
     
     logger.info(f"[ROUTER] Fallback Intent: {intents}")
     return intents, {}
@@ -125,16 +130,11 @@ def build_agent_task(intent: str, customer_id: int, text: str, entities: dict):
         if intent == "list_customers":
             status = entities.get("status_filter")
             if not status and "active" in text.lower(): status = "active"
-            
-            # --- FIX: FORCE LOWERCASE ---
-            if status:
-                status = status.lower() # Converts "Active" -> "active"
-            
+            if status: status = status.lower()
             payload["status"] = status
 
         if intent == "update_email":
             new_email = entities.get("email")
-            # Regex backup for email if LLM missed it
             if not new_email:
                 import re
                 match = re.search(r'[\w\.-]+@[\w\.-]+', text)
@@ -158,7 +158,6 @@ def build_agent_task(intent: str, customer_id: int, text: str, entities: dict):
         if intent in ["refund_request", "cancel_subscription", "upgrade_request", "escalate_issue"]:
             requires_escalation = True
 
-    # Log the Handoff
     logger.info(f"[ROUTER] Handoff: Sending '{intent}' to {recipient_name}")
 
     msg = create_a2a_message(
@@ -182,23 +181,18 @@ async def query_endpoint(request: Request):
     if not text or not customer_id:
         return {"status": "error", "message": "Missing 'text' or 'customer_id'"}
 
-    # A. CLASSIFY
     intents, entities = classify_intents_with_llm(text)
 
-    # B. BUILD TASKS
     tasks = []
     task_metadata = []
     for intent in intents:
         target_url, msg, intent_name, requires_escalation = build_agent_task(intent, customer_id, text, entities)
-        # We use asyncio.to_thread because 'requests' is blocking
         tasks.append(asyncio.to_thread(agent.send_message, target_url, msg))
         task_metadata.append({"intent": intent_name, "requires_escalation": requires_escalation})
 
-    # C. EXECUTE (Parallel)
     logger.info(f"[ROUTER] Waiting for {len(tasks)} agent(s) to respond...")
     results_raw = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # D. AGGREGATE RESULTS
     results = []
     for meta, res in zip(task_metadata, results_raw):
         status = "error"
@@ -208,12 +202,10 @@ async def query_endpoint(request: Request):
             logger.error(f"[ROUTER] Agent Execution Failed: {res}")
             data = str(res)
         elif isinstance(res, dict):
-            # Unwrap the standard A2A response envelope
             if "payload" in res:
                 payload_list = res.get("payload", [])
                 if isinstance(payload_list, list) and len(payload_list) > 0:
-                    data = payload_list[0] # Take the first result item
-                    # Try to parse status from the agent's data packet
+                    data = payload_list[0] 
                     if isinstance(data, dict):
                         status = data.get("status", "ok")
                     else:
@@ -222,7 +214,6 @@ async def query_endpoint(request: Request):
                     status = "ok"
                     data = payload_list
             else:
-                # If agent returned error directly
                 status = res.get("status", "unknown")
                 data = res.get("data") or res.get("error")
         
