@@ -16,8 +16,6 @@ The system orchestrates three autonomous agents to handle complex customer queri
 ## Prerequisites
 
 * Python 3.10+
-* `pip`
-* **Hugging Face API Token** (Free tier, "Read" permissions required)
 
 ## Installation
 
@@ -57,14 +55,6 @@ The system orchestrates three autonomous agents to handle complex customer queri
 **Important:** You must set your Hugging Face Token for the agents to function intelligently.
 
 1.  **Set API Token:**
-
-    ```bash
-    # Mac/Linux
-    export HF_TOKEN="your_hf_token_here"
-
-    # Windows (CMD)
-    set HF_TOKEN=your_hf_token_here
-    ```
 
 2.  **Launch Agents:**
     Open three separate terminal windows (ensure the venv is active and the token is set in each):
