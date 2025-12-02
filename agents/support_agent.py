@@ -1,10 +1,11 @@
+import asyncio
+import logging
+import json
+import uvicorn
+
 from fastapi import FastAPI, Request
 from agents.agent_client import AgentConnector, create_a2a_message, check_message_schema, generate_error_response
 from agents.llm_service import query_llm
-import uvicorn
-import logging
-import asyncio
-import json
 
 app = FastAPI(title="Support Agent")
 agent = AgentConnector()
@@ -40,13 +41,10 @@ def generate_polite_response(action_taken, details, customer_text):
     
     INSTRUCTIONS:
     - Draft a very short, direct chat response (1-2 sentences).
-    - CONFIRM the action was done.
-    - NO "Dear Customer" headers.
-    - NO "Best Regards" signatures.
-    - NO emails. Be conversational and concise.
+    - CONFIRM the action was done. NO headers or signatures.
+    - Be conversational and concise.
     """
     
-    # We want text output, not JSON
     response = query_llm(system_prompt, "Draft chat response", json_mode=False)
     
     if not response:
@@ -54,37 +52,27 @@ def generate_polite_response(action_taken, details, customer_text):
     return response
 
 # -------------------------
-# Intent handlers
+# Intent handlers (WITH ALIASES)
 # -------------------------
 async def handle_support_intent(intent: str, payload: dict):
     customer_id = payload.get("customer_id")
     text = payload.get("text", "")
     entities = payload.get("entities", {}) 
     
-    # Logic Processing
     response_data = {}
     action_description = ""
 
-    if intent == "support_request":
-        action_description = "General inquiry logged."
-        response_data = {"status": "ok"}
-
-    elif intent == "refund_request":
-        action_description = "Refund initiated successfully."
-        response_data = {"status": "ok", "refund_id": "REF-998877"}
-
-    elif intent == "cancel_subscription":
-        action_description = "Subscription cancelled."
-        response_data = {"status": "ok"}
-
-    elif intent == "upgrade_request":
+    # --- UPGRADE REQUEST ALIASES (Fixes upgrade_account) ---
+    if intent in ["upgrade_request", "upgrade_account"]:
         action_description = "Upgrade processed."
         response_data = {"status": "ok"}
 
-    elif intent == "show_ticket_status":
+    # --- TICKET STATUS ALIASES (Fixes show_ticket_history, get_active_customers_with_open_tickets, get_customer_history) ---
+    elif intent in ["show_ticket_status", "show_ticket_history", "get_active_customers_with_open_tickets", "get_customer_history"]:
         if not customer_id:
             return {"status": "error", "error": "Missing customer_id"}
         
+        # NOTE: We use list_tickets for status/history here
         tickets = await agent.invoke_tool("list_tickets", {"customer_ids": [customer_id]})
         
         if isinstance(tickets, list) and len(tickets) > 0:
@@ -95,7 +83,8 @@ async def handle_support_intent(intent: str, payload: dict):
             
         response_data = tickets
 
-    elif intent == "escalate_issue":
+    # --- ESCALATION/BILLING ALIASES (Fixes billing_issues, angry_customer) ---
+    elif intent in ["escalate_issue", "billing_issues", "angry_customer"]:
         reason = entities.get("reason") or text
         ticket = await agent.invoke_tool("create_ticket", {
             "customer_id": customer_id,
@@ -106,6 +95,19 @@ async def handle_support_intent(intent: str, payload: dict):
         action_description = f"Escalation Ticket #{ticket_id} created."
         response_data = ticket
 
+    # --- REST OF HANDLERS ---
+    elif intent == "refund_request":
+        action_description = "Refund initiated successfully."
+        response_data = {"status": "ok", "refund_id": "REF-998877"}
+
+    elif intent == "cancel_subscription":
+        action_description = "Subscription cancelled."
+        response_data = {"status": "ok"}
+
+    elif intent == "support_request":
+        action_description = "General inquiry logged."
+        response_data = {"status": "ok"}
+    
     else:
         return {"status": "error", "error": f"Unknown intent: {intent}"}
 
@@ -142,6 +144,10 @@ async def a2a_handler(request: Request):
 
     except Exception as e:
         return generate_error_response(msg, str(e))
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8102)

@@ -3,6 +3,7 @@ import logging
 import uvicorn
 import os
 import json
+import re
 
 from fastapi import FastAPI, Request
 from agents.agent_client import AgentConnector, create_a2a_message, check_message_schema, generate_error_response
@@ -11,10 +12,8 @@ from agents.llm_service import query_llm
 # -------------------------
 # Configuration
 # -------------------------
-
-os.environ['HF_TOKEN'] = "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"
-
-HF_TOKEN = "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"
+if "HF_TOKEN" not in os.environ:
+    os.environ['HF_TOKEN'] = "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"
 
 SUPPORT_AGENT_URL = "http://127.0.0.1:8102"
 DATA_AGENT_URL = "http://127.0.0.1:8101"
@@ -53,14 +52,32 @@ def classify_intents_with_llm(text: str):
     system_prompt = """
     You are the Senior Orchestrator for a Customer Service System. 
     Your job is to analyze the user's request and route it to the correct internal function.
-    
-    [List of AVAILABLE INTENTS provided here for LLM]
+
+    [IMPORTANT INSTRUCTION] You MUST only use intent names from the ALLOWED LIST below. DO NOT INVENT INTENT NAMES.
+
+    ALLOWED INTENTS:
+    - get_customer_info
+    - get_customer_history
+    - update_email
+    - list_customers
+    - refund_request
+    - cancel_subscription
+    - upgrade_request
+    - show_ticket_status
+    - escalate_issue
+    - support_request
 
     INSTRUCTIONS:
     1. specific_reasoning: Explain WHY you chose the intent in 1 short sentence.
-    2. intents: The list of matching intents (usually 1, but can be multiple).
+    2. intents: The list of matching intents (MUST be from the ALLOWED LIST).
     3. entities: Extract 'email', 'status_filter', or 'reason'.
 
+    EXAMPLE JSON OUTPUT (MUST be precise):
+    {
+        "reasoning": "User needs information about their profile.",
+        "intents": ["get_customer_info"],
+        "entities": { "email": null }
+    }
     """
     
     # Primary LLM Call
@@ -75,45 +92,9 @@ def classify_intents_with_llm(text: str):
         logger.info(f"[ROUTER] Detected Intent: {intents}")
         return intents, entities
     
-    # --- FALLBACK LOGIC (Robust Multi-Intent Detection) ---
-    logger.warning("[ROUTER] LLM Failed or Timed Out. Using Robust Regex Fallback.")
-    intents = []
-    text_lower = text.lower()
-    
-    # We use independent IF statements so multiple intents can trigger at once
-    if "refund" in text_lower or "money back" in text_lower: 
-        intents.append("refund_request")
-        
-    if "cancel" in text_lower: 
-        intents.append("cancel_subscription")
-        
-    if "upgrade" in text_lower:
-        intents.append("upgrade_request")
-        
-    if "active" in text_lower and "customers" in text_lower: 
-        intents.append("list_customers")
-        
-    if "email" in text_lower and "update" in text_lower: 
-        intents.append("update_email")
-        
-    if "history" in text_lower or "past tickets" in text_lower: 
-        intents.append("get_customer_history")
-        
-    if "ticket" in text_lower or "status" in text_lower: 
-        intents.append("show_ticket_status")
-        
-    # CRITICAL CHECK for Scenario 6: Catches "billing issues" or "complaint"
-    if "billing" in text_lower or "issues" in text_lower or "complaining" in text_lower:
-        # If cancellation/refund was caught, this adds the necessary second intent for escalation
-        if "escalate_issue" not in intents:
-            intents.append("escalate_issue")
-            
-    # Default if nothing matched
-    if not intents:
-        intents.append("support_request")
-    
-    logger.info(f"[ROUTER] Fallback Intent: {intents}")
-    return intents, {}
+    # --- NO FALLBACK (If LLM Fails, we let the system report the failure) ---
+    logger.error("[ROUTER] LLM Failed. Cannot classify intent.")
+    return [], {}
 
 # -------------------------
 # 2. Task Routing Logic
@@ -229,9 +210,6 @@ async def query_endpoint(request: Request):
     logger.info(f"[ROUTER] Request Complete. Returning {len(results)} result(s).\n")
     return {"status": "ok", "results": results}
 
-# -------------------------
-# A2A Interface
-# -------------------------
 @app.post("/a2a")
 async def a2a_handler(request: Request):
     """Standard Agent-to-Agent listener (Required for protocol compliance)"""

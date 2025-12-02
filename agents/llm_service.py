@@ -9,8 +9,8 @@ import os
 # ---------------------------------------------------------
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 MODEL_ID = "meta-llama/Llama-3.2-3B-Instruct"
-HF_TOKEN = "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"  # Hardcoded token
-os.environ['HF_TOKEN'] = "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"
+HF_TOKEN = "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"  # Hardcoded token
+os.environ['HF_TOKEN'] = "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"
 
 def clean_json_text(text: str) -> str:
     """Extract JSON from text."""
