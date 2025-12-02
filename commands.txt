@@ -1,0 +1,30 @@
+PART 1: ENVIRONMENT SETUP
+
+Run these in your terminal (Root Folder)
+
+1. Create the virtual environment
+  python3 -m venv venv
+
+2. Activate the environment (Mac/Linux)
+  source venv/bin/activate
+
+3. Install required libraries
+  pip install fastapi uvicorn requests mcp pydantic python-dotenv
+
+4. Initialize the Database 
+  python -m mcp_server.database_setup
+
+PART 2: RUNNING THE AGENTS
+
+Open 3 SEPARATE terminal windows.
+--- TERMINAL 1 (Data Agent) ---
+  python -m agents.customer_data_agent
+
+--- TERMINAL 2 (Support Agent) ---
+  python -m agents.support_agent
+
+--- TERMINAL 3 (Router Agent) ---
+  python -m agents.router_agent
+
+PART 3: RUNNING THE TESTS
+  python -m tests.run_scenarios
