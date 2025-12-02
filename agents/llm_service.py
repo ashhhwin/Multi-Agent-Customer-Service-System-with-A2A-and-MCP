@@ -2,6 +2,7 @@ import requests
 import json
 import re
 import time
+import os
 
 # ---------------------------------------------------------
 # Configuration
@@ -9,6 +10,7 @@ import time
 API_URL = "https://router.huggingface.co/v1/chat/completions"
 MODEL_ID = "meta-llama/Llama-3.2-3B-Instruct"
 HF_TOKEN = "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"  # Hardcoded token
+os.environ['HF_TOKEN'] = "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"
 
 def clean_json_text(text: str) -> str:
     """Extract JSON from text."""
