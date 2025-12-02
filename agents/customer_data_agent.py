@@ -44,7 +44,7 @@ async def handle_customer_intent(intent: str, payload: dict):
     # NOTE: We must use 'await' here because the new AgentConnector 
     # uses async MCP client to talk to the server.
     
-    if intent == "get_customer_info":
+    if intent in ["get_customer_info", "get_customer_info_by_id"]:
         return await agent.invoke_tool("get_customer", normalize_payload(payload))
 
     elif intent == "list_customers":
